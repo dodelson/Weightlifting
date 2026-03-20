@@ -115,10 +115,11 @@
             if (parsed.getFullYear() > 2026) {
                 parsed.setFullYear(parsed.getFullYear() - 3);
             }
-            return parsed.getTime();
+            return parsed;
         }
 
-        function extractLift(dataRows, colStart, colEnd) {
+        // For bench: volume vs mean, colored by date
+        function extractBench(dataRows, colStart, colEnd) {
             const dates = [], volumes = [], means = [], hoverTexts = [], dateNums = [];
             for (const row of dataRows) {
                 if (!row || row.length < 2) continue;
@@ -136,17 +137,58 @@
                 }
                 if (!hasData) continue;
 
-                const dateNum = fixDate(dateStr);
-                if (!dateNum) continue;
+                const dateObj = fixDate(dateStr);
+                if (!dateObj) continue;
 
                 const meanWeight = totalVolume / totalReps;
                 dates.push(dateStr);
-                dateNums.push(dateNum);
+                dateNums.push(dateObj.getTime());
                 volumes.push(totalVolume);
                 means.push(meanWeight);
                 hoverTexts.push(`${dateStr}<br>Mean: ${meanWeight.toFixed(1)}<br>Volume: ${totalVolume}`);
             }
             return { dates, dateNums, volumes, means, hoverTexts };
+        }
+
+        // For deadlift/squat: date vs top weight, sized/colored by reps at top weight
+        function extractTopWeight(dataRows, colStart, colEnd) {
+            const dates = [], topWeights = [], repsAtTop = [], hoverTexts = [];
+            for (const row of dataRows) {
+                if (!row || row.length < 2) continue;
+                const dateStr = (row[0] || '').trim();
+                if (!dateStr) continue;
+
+                const dateObj = fixDate(dateStr);
+                if (!dateObj) continue;
+
+                // Collect all sets
+                const sets = [];
+                let hasData = false;
+                for (let c = colStart; c <= colEnd && c < row.length; c++) {
+                    const parsed = parseSet(row[c]);
+                    if (parsed.reps > 0 && parsed.weight > 0) {
+                        sets.push(parsed);
+                        hasData = true;
+                    }
+                }
+                if (!hasData) continue;
+
+                // Find top weight and count reps at that weight
+                let maxWeight = 0;
+                for (const s of sets) {
+                    if (s.weight > maxWeight) maxWeight = s.weight;
+                }
+                let repsTop = 0;
+                for (const s of sets) {
+                    if (s.weight === maxWeight) repsTop += s.reps;
+                }
+
+                dates.push(dateObj);
+                topWeights.push(maxWeight);
+                repsAtTop.push(repsTop);
+                hoverTexts.push(`${dateStr}<br>Top: ${maxWeight}<br>Reps at top: ${repsTop}`);
+            }
+            return { dates, topWeights, repsAtTop, hoverTexts };
         }
 
         function makeColorbar(dateNums) {
@@ -163,7 +205,7 @@
             return { title: 'Date', tickvals, ticktext };
         }
 
-        function plotLift(divId, data, title, xRange, yRange) {
+        function plotBench(divId, data) {
             const trace = {
                 x: data.means,
                 y: data.volumes,
@@ -188,8 +230,8 @@
             };
 
             const refLine = {
-                x: xRange,
-                y: [xRange[0] * 15, xRange[1] * 15],
+                x: [130, 175],
+                y: [130 * 15, 175 * 15],
                 mode: 'lines',
                 type: 'scatter',
                 line: { dash: 'dash', color: 'rgba(0,0,0,0.2)', width: 1.5 },
@@ -198,9 +240,9 @@
             };
 
             const layout = {
-                title: { text: title, font: { color: '#333', size: 20 } },
-                xaxis: { title: 'Mean', range: xRange, gridcolor: '#e0e0e0' },
-                yaxis: { title: 'Volume', range: yRange, gridcolor: '#e0e0e0' },
+                title: { text: 'Bench', font: { color: '#333', size: 20 } },
+                xaxis: { title: 'Mean', range: [130, 175], gridcolor: '#e0e0e0' },
+                yaxis: { title: 'Volume', range: [1500, 4000], gridcolor: '#e0e0e0' },
                 showlegend: false,
                 paper_bgcolor: '#ffffff',
                 plot_bgcolor: '#ffffff',
@@ -208,6 +250,45 @@
             };
 
             Plotly.newPlot(divId, [refLine, trace], layout, { responsive: true, displayModeBar: false });
+        }
+
+        function plotTopWeight(divId, data, title) {
+            // Size dots by reps at top weight, color by reps too
+            const maxReps = Math.max(...data.repsAtTop);
+            const sizes = data.repsAtTop.map(r => 6 + (r / maxReps) * 24);
+
+            const trace = {
+                x: data.dates,
+                y: data.topWeights,
+                mode: 'markers',
+                type: 'scatter',
+                marker: {
+                    size: sizes,
+                    color: data.repsAtTop,
+                    colorscale: [
+                        [0, '#fee08b'],
+                        [0.5, '#fc8d59'],
+                        [1, '#d73027']
+                    ],
+                    colorbar: { title: 'Reps at top' },
+                    line: { width: 1, color: '#666' }
+                },
+                text: data.hoverTexts,
+                hoverinfo: 'text',
+                showlegend: false
+            };
+
+            const layout = {
+                title: { text: title, font: { color: '#333', size: 20 } },
+                xaxis: { title: 'Date', gridcolor: '#e0e0e0', type: 'date' },
+                yaxis: { title: 'Top Weight', gridcolor: '#e0e0e0' },
+                showlegend: false,
+                paper_bgcolor: '#ffffff',
+                plot_bgcolor: '#ffffff',
+                margin: { t: 50, b: 50, l: 60, r: 20 }
+            };
+
+            Plotly.newPlot(divId, [trace], layout, { responsive: true, displayModeBar: false });
         }
 
         async function loadData() {
@@ -241,16 +322,15 @@
             const rows = parseCSV(text);
             const dataRows = rows.slice(2);
 
-            // Bench: columns 1-5, Deadlift: columns 6-10, Squat: columns 11-15
-            const bench = extractLift(dataRows, 1, 5);
-            const deadlift = extractLift(dataRows, 6, 10);
-            const squat = extractLift(dataRows, 11, 15);
+            const bench = extractBench(dataRows, 1, 5);
+            const deadlift = extractTopWeight(dataRows, 6, 10);
+            const squat = extractTopWeight(dataRows, 11, 15);
 
             document.getElementById('loading').style.display = 'none';
 
-            plotLift('plot-bench', bench, 'Bench', [130, 175], [1500, 4000]);
-            plotLift('plot-deadlift', deadlift, 'Deadlift', [200, 320], [500, 3000]);
-            plotLift('plot-squat', squat, 'Squat', [150, 260], [500, 3000]);
+            plotBench('plot-bench', bench);
+            plotTopWeight('plot-deadlift', deadlift, 'Deadlift');
+            plotTopWeight('plot-squat', squat, 'Squat');
 
             const now = new Date();
             document.getElementById('status').textContent =
