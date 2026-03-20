@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bench Press Tracker</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #ffffff;
+            color: #333;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        #plot { width: 100%; max-width: 900px; height: 80vh; min-height: 400px; }
+        .controls {
+            padding: 12px;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        #status { font-size: 14px; opacity: 0.7; }
+        button {
+            background: #eee;
+            color: #333;
+            border: 1px solid #ccc;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        button:hover { background: #ddd; }
+        #loading { padding: 40px; font-size: 18px; }
+    </style>
+</head>
+<body>
+    <div class="controls">
+        <span id="status">Loading...</span>
+        <button onclick="loadData()">Refresh</button>
+    </div>
+    <div id="loading">Fetching data...</div>
+    <div id="plot"></div>
+
+    <script>
+        function parseSet(val) {
+            if (!val) return { reps: 0, weight: 0 };
+            val = val.trim();
+            if (!val) return { reps: 0, weight: 0 };
+            // Skip non-numeric entries
+            if (/[a-zA-Z]/.test(val.replace(/x/gi, ''))) return { reps: 0, weight: 0 };
+
+            const parts = val.split(/x/i);
+            if (parts.length === 1) {
+                const w = parseFloat(parts[0]);
+                return isNaN(w) ? { reps: 0, weight: 0 } : { reps: 1, weight: w };
+            } else if (parts.length === 2) {
+                const a = parseFloat(parts[0]);
+                const b = parseFloat(parts[1]);
+                if (isNaN(a) || isNaN(b)) return { reps: 0, weight: 0 };
+                return { reps: a, weight: b };
+            } else if (parts.length === 3) {
+                // "3x1x155" means 3 singles at 155
+                const sets = parseFloat(parts[0]);
+                const repsPerSet = parseFloat(parts[1]);
+                const w = parseFloat(parts[2]);
+                if (isNaN(sets) || isNaN(repsPerSet) || isNaN(w)) return { reps: 0, weight: 0 };
+                return { reps: sets * repsPerSet, weight: w };
+            }
+            return { reps: 0, weight: 0 };
+        }
+
+        function parseCSV(text) {
+            const rows = [];
+            let current = '';
+            let inQuotes = false;
+            const lines = [];
+
+            for (let i = 0; i < text.length; i++) {
+                const ch = text[i];
+                if (ch === '"') {
+                    if (inQuotes && text[i + 1] === '"') {
+                        current += '"';
+                        i++;
+                    } else {
+                        inQuotes = !inQuotes;
+                    }
+                } else if (ch === ',' && !inQuotes) {
+                    lines.push(current);
+                    current = '';
+                } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+                    lines.push(current);
+                    current = '';
+                    rows.push(lines.splice(0));
+                    if (ch === '\r' && text[i + 1] === '\n') i++;
+                } else {
+                    current += ch;
+                }
+            }
+            if (current || lines.length) {
+                lines.push(current);
+                rows.push(lines.splice(0));
+            }
+            return rows;
+        }
+
+        async function loadData() {
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('status').textContent = 'Loading...';
+
+            const urls = [
+                'https://docs.google.com/spreadsheets/d/1SlEJF74TRMOfuJFkaV0DX6n5SLbGs2PDiyeAyC_2hEQ/gviz/tq?tqx=out:csv',
+                'https://docs.google.com/spreadsheets/d/1SlEJF74TRMOfuJFkaV0DX6n5SLbGs2PDiyeAyC_2hEQ/export?format=csv'
+            ];
+
+            let text = null;
+            for (const url of urls) {
+                try {
+                    const resp = await fetch(url, { redirect: 'follow' });
+                    if (resp.ok) {
+                        text = await resp.text();
+                        break;
+                    }
+                } catch (e) {
+                    console.warn('Fetch failed for', url, e);
+                }
+            }
+
+            if (!text) {
+                document.getElementById('loading').textContent = 'Failed to fetch data. Try refreshing.';
+                document.getElementById('status').textContent = 'Error';
+                return;
+            }
+
+            const rows = parseCSV(text);
+            // Skip header rows (row 0 = category headers, row 1 = set labels)
+            const dataRows = rows.slice(2);
+
+            const dates = [];
+            const volumes = [];
+            const means = [];
+            const hoverTexts = [];
+
+            for (const row of dataRows) {
+                if (!row || row.length < 2) continue;
+                const dateStr = (row[0] || '').trim();
+                if (!dateStr) continue;
+
+                // Parse bench columns B-F (indices 1-5)
+                let totalVolume = 0;
+                let totalReps = 0;
+
+                let hasBench = false;
+                for (let c = 1; c <= 5 && c < row.length; c++) {
+                    const parsed = parseSet(row[c]);
+                    if (parsed.reps > 0 && parsed.weight > 0) {
+                        totalVolume += parsed.reps * parsed.weight;
+                        totalReps += parsed.reps;
+                        hasBench = true;
+                    }
+                }
+
+                if (!hasBench) continue;
+
+                const meanWeight = totalVolume / totalReps;
+                dates.push(dateStr);
+                volumes.push(totalVolume);
+                means.push(meanWeight);
+                hoverTexts.push(`${dateStr}<br>Mean: ${meanWeight.toFixed(1)}<br>Volume: ${totalVolume}`);
+            }
+
+            // Convert dates to numeric for color scale, fixing obvious typos
+            const dateNums = dates.map(d => {
+                let parsed = new Date(d);
+                if (isNaN(parsed.getTime())) return 0;
+                // Fix year typos (e.g., 2028 should be 2025)
+                if (parsed.getFullYear() > 2026) {
+                    parsed.setFullYear(parsed.getFullYear() - 3);
+                }
+                return parsed.getTime();
+            });
+
+            const trace = {
+                x: means,
+                y: volumes,
+                mode: 'markers',
+                type: 'scatter',
+                marker: {
+                    size: 12,
+                    color: dateNums,
+                    colorscale: [
+                        [0, '#d73027'],
+                        [0.25, '#fc8d59'],
+                        [0.5, '#fee08b'],
+                        [0.75, '#91bfdb'],
+                        [1, '#4575b4']
+                    ],
+                    colorbar: {
+                        title: 'Date',
+                        tickvals: (() => {
+                            const mn = Math.min(...dateNums.filter(d => d > 0));
+                            const mx = Math.max(...dateNums.filter(d => d > 0));
+                            const ticks = [];
+                            for (let i = 0; i <= 4; i++) ticks.push(mn + (mx - mn) * i / 4);
+                            return ticks;
+                        })(),
+                        ticktext: (() => {
+                            const mn = Math.min(...dateNums.filter(d => d > 0));
+                            const mx = Math.max(...dateNums.filter(d => d > 0));
+                            const texts = [];
+                            for (let i = 0; i <= 4; i++) {
+                                const t = mn + (mx - mn) * i / 4;
+                                const d = new Date(t);
+                                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+                                texts.push(`${months[d.getMonth()]} ${d.getFullYear()}`);
+                            }
+                            return texts;
+                        })(),
+                    },
+                    line: { width: 1, color: '#666' }
+                },
+                text: hoverTexts,
+                hoverinfo: 'text'
+            };
+
+            // Reference line: y = 15 * x
+            const refLine = {
+                x: [130, 175],
+                y: [130 * 15, 175 * 15],
+                mode: 'lines',
+                type: 'scatter',
+                line: { dash: 'dash', color: 'rgba(0,0,0,0.2)', width: 1.5 },
+                hoverinfo: 'skip',
+                showlegend: false
+            };
+
+            const layout = {
+                title: { text: 'Bench', font: { color: '#333', size: 20 } },
+                xaxis: {
+                    title: 'Mean',
+                    range: [130, 175],
+                    gridcolor: '#e0e0e0',
+                },
+                yaxis: {
+                    title: 'Volume',
+                    range: [1500, 4000],
+                    gridcolor: '#e0e0e0',
+                },
+                paper_bgcolor: '#ffffff',
+                plot_bgcolor: '#ffffff',
+                margin: { t: 50, b: 50, l: 60, r: 20 }
+            };
+
+            const config = { responsive: true, displayModeBar: false };
+
+            document.getElementById('loading').style.display = 'none';
+            Plotly.newPlot('plot', [refLine, trace], layout, config);
+
+            const now = new Date();
+            document.getElementById('status').textContent =
+                `Last updated: ${now.toLocaleString()} (${dates.length} sessions)`;
+        }
+
+        loadData();
+    </script>
+</body>
+</html>
