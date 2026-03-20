@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bench Press Tracker</title>
+    <title>Lifting Tracker</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -16,7 +16,7 @@
             flex-direction: column;
             align-items: center;
         }
-        #plot { width: 100%; max-width: 900px; height: 80vh; min-height: 400px; }
+        .plot { width: 100%; max-width: 900px; height: 70vh; min-height: 350px; }
         .controls {
             padding: 12px;
             display: flex;
@@ -45,14 +45,15 @@
         <button onclick="loadData()">Refresh</button>
     </div>
     <div id="loading">Fetching data...</div>
-    <div id="plot"></div>
+    <div id="plot-bench" class="plot"></div>
+    <div id="plot-deadlift" class="plot"></div>
+    <div id="plot-squat" class="plot"></div>
 
     <script>
         function parseSet(val) {
             if (!val) return { reps: 0, weight: 0 };
             val = val.trim();
             if (!val) return { reps: 0, weight: 0 };
-            // Skip non-numeric entries
             if (/[a-zA-Z]/.test(val.replace(/x/gi, ''))) return { reps: 0, weight: 0 };
 
             const parts = val.split(/x/i);
@@ -65,7 +66,6 @@
                 if (isNaN(a) || isNaN(b)) return { reps: 0, weight: 0 };
                 return { reps: a, weight: b };
             } else if (parts.length === 3) {
-                // "3x1x155" means 3 singles at 155
                 const sets = parseFloat(parts[0]);
                 const repsPerSet = parseFloat(parts[1]);
                 const w = parseFloat(parts[2]);
@@ -109,6 +109,107 @@
             return rows;
         }
 
+        function fixDate(dateStr) {
+            let parsed = new Date(dateStr);
+            if (isNaN(parsed.getTime())) return null;
+            if (parsed.getFullYear() > 2026) {
+                parsed.setFullYear(parsed.getFullYear() - 3);
+            }
+            return parsed.getTime();
+        }
+
+        function extractLift(dataRows, colStart, colEnd) {
+            const dates = [], volumes = [], means = [], hoverTexts = [], dateNums = [];
+            for (const row of dataRows) {
+                if (!row || row.length < 2) continue;
+                const dateStr = (row[0] || '').trim();
+                if (!dateStr) continue;
+
+                let totalVolume = 0, totalReps = 0, hasData = false;
+                for (let c = colStart; c <= colEnd && c < row.length; c++) {
+                    const parsed = parseSet(row[c]);
+                    if (parsed.reps > 0 && parsed.weight > 0) {
+                        totalVolume += parsed.reps * parsed.weight;
+                        totalReps += parsed.reps;
+                        hasData = true;
+                    }
+                }
+                if (!hasData) continue;
+
+                const dateNum = fixDate(dateStr);
+                if (!dateNum) continue;
+
+                const meanWeight = totalVolume / totalReps;
+                dates.push(dateStr);
+                dateNums.push(dateNum);
+                volumes.push(totalVolume);
+                means.push(meanWeight);
+                hoverTexts.push(`${dateStr}<br>Mean: ${meanWeight.toFixed(1)}<br>Volume: ${totalVolume}`);
+            }
+            return { dates, dateNums, volumes, means, hoverTexts };
+        }
+
+        function makeColorbar(dateNums) {
+            const valid = dateNums.filter(d => d > 0);
+            const mn = Math.min(...valid), mx = Math.max(...valid);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const tickvals = [], ticktext = [];
+            for (let i = 0; i <= 4; i++) {
+                const t = mn + (mx - mn) * i / 4;
+                tickvals.push(t);
+                const d = new Date(t);
+                ticktext.push(`${months[d.getMonth()]} ${d.getFullYear()}`);
+            }
+            return { title: 'Date', tickvals, ticktext };
+        }
+
+        function plotLift(divId, data, title, xRange, yRange) {
+            const trace = {
+                x: data.means,
+                y: data.volumes,
+                mode: 'markers',
+                type: 'scatter',
+                marker: {
+                    size: 12,
+                    color: data.dateNums,
+                    colorscale: [
+                        [0, '#d73027'],
+                        [0.25, '#fc8d59'],
+                        [0.5, '#fee08b'],
+                        [0.75, '#91bfdb'],
+                        [1, '#4575b4']
+                    ],
+                    colorbar: makeColorbar(data.dateNums),
+                    line: { width: 1, color: '#666' }
+                },
+                text: data.hoverTexts,
+                hoverinfo: 'text',
+                showlegend: false
+            };
+
+            const refLine = {
+                x: xRange,
+                y: [xRange[0] * 15, xRange[1] * 15],
+                mode: 'lines',
+                type: 'scatter',
+                line: { dash: 'dash', color: 'rgba(0,0,0,0.2)', width: 1.5 },
+                hoverinfo: 'skip',
+                showlegend: false
+            };
+
+            const layout = {
+                title: { text: title, font: { color: '#333', size: 20 } },
+                xaxis: { title: 'Mean', range: xRange, gridcolor: '#e0e0e0' },
+                yaxis: { title: 'Volume', range: yRange, gridcolor: '#e0e0e0' },
+                showlegend: false,
+                paper_bgcolor: '#ffffff',
+                plot_bgcolor: '#ffffff',
+                margin: { t: 50, b: 50, l: 60, r: 20 }
+            };
+
+            Plotly.newPlot(divId, [refLine, trace], layout, { responsive: true, displayModeBar: false });
+        }
+
         async function loadData() {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('status').textContent = 'Loading...';
@@ -138,134 +239,22 @@
             }
 
             const rows = parseCSV(text);
-            // Skip header rows (row 0 = category headers, row 1 = set labels)
             const dataRows = rows.slice(2);
 
-            const dates = [];
-            const volumes = [];
-            const means = [];
-            const hoverTexts = [];
-
-            for (const row of dataRows) {
-                if (!row || row.length < 2) continue;
-                const dateStr = (row[0] || '').trim();
-                if (!dateStr) continue;
-
-                // Parse bench columns B-F (indices 1-5)
-                let totalVolume = 0;
-                let totalReps = 0;
-
-                let hasBench = false;
-                for (let c = 1; c <= 5 && c < row.length; c++) {
-                    const parsed = parseSet(row[c]);
-                    if (parsed.reps > 0 && parsed.weight > 0) {
-                        totalVolume += parsed.reps * parsed.weight;
-                        totalReps += parsed.reps;
-                        hasBench = true;
-                    }
-                }
-
-                if (!hasBench) continue;
-
-                const meanWeight = totalVolume / totalReps;
-                dates.push(dateStr);
-                volumes.push(totalVolume);
-                means.push(meanWeight);
-                hoverTexts.push(`${dateStr}<br>Mean: ${meanWeight.toFixed(1)}<br>Volume: ${totalVolume}`);
-            }
-
-            // Convert dates to numeric for color scale, fixing obvious typos
-            const dateNums = dates.map(d => {
-                let parsed = new Date(d);
-                if (isNaN(parsed.getTime())) return 0;
-                // Fix year typos (e.g., 2028 should be 2025)
-                if (parsed.getFullYear() > 2026) {
-                    parsed.setFullYear(parsed.getFullYear() - 3);
-                }
-                return parsed.getTime();
-            });
-
-            const trace = {
-                x: means,
-                y: volumes,
-                mode: 'markers',
-                type: 'scatter',
-                marker: {
-                    size: 12,
-                    color: dateNums,
-                    colorscale: [
-                        [0, '#d73027'],
-                        [0.25, '#fc8d59'],
-                        [0.5, '#fee08b'],
-                        [0.75, '#91bfdb'],
-                        [1, '#4575b4']
-                    ],
-                    colorbar: {
-                        title: 'Date',
-                        tickvals: (() => {
-                            const mn = Math.min(...dateNums.filter(d => d > 0));
-                            const mx = Math.max(...dateNums.filter(d => d > 0));
-                            const ticks = [];
-                            for (let i = 0; i <= 4; i++) ticks.push(mn + (mx - mn) * i / 4);
-                            return ticks;
-                        })(),
-                        ticktext: (() => {
-                            const mn = Math.min(...dateNums.filter(d => d > 0));
-                            const mx = Math.max(...dateNums.filter(d => d > 0));
-                            const texts = [];
-                            for (let i = 0; i <= 4; i++) {
-                                const t = mn + (mx - mn) * i / 4;
-                                const d = new Date(t);
-                                const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-                                texts.push(`${months[d.getMonth()]} ${d.getFullYear()}`);
-                            }
-                            return texts;
-                        })(),
-                    },
-                    line: { width: 1, color: '#666' }
-                },
-                text: hoverTexts,
-                hoverinfo: 'text',
-                showlegend: false
-            };
-
-            // Reference line: y = 15 * x
-            const refLine = {
-                x: [130, 175],
-                y: [130 * 15, 175 * 15],
-                mode: 'lines',
-                type: 'scatter',
-                line: { dash: 'dash', color: 'rgba(0,0,0,0.2)', width: 1.5 },
-                hoverinfo: 'skip',
-                showlegend: false
-            };
-
-            const layout = {
-                title: { text: 'Bench', font: { color: '#333', size: 20 } },
-                xaxis: {
-                    title: 'Mean',
-                    range: [130, 175],
-                    gridcolor: '#e0e0e0',
-                },
-                yaxis: {
-                    title: 'Volume',
-                    range: [1500, 4000],
-                    gridcolor: '#e0e0e0',
-                },
-                showlegend: false,
-                paper_bgcolor: '#ffffff',
-                plot_bgcolor: '#ffffff',
-                margin: { t: 50, b: 50, l: 60, r: 20 }
-            };
-
-            const config = { responsive: true, displayModeBar: false };
+            // Bench: columns 1-5, Deadlift: columns 6-10, Squat: columns 11-15
+            const bench = extractLift(dataRows, 1, 5);
+            const deadlift = extractLift(dataRows, 6, 10);
+            const squat = extractLift(dataRows, 11, 15);
 
             document.getElementById('loading').style.display = 'none';
-            Plotly.newPlot('plot', [refLine, trace], layout, config);
+
+            plotLift('plot-bench', bench, 'Bench', [130, 175], [1500, 4000]);
+            plotLift('plot-deadlift', deadlift, 'Deadlift', [200, 320], [500, 3000]);
+            plotLift('plot-squat', squat, 'Squat', [150, 260], [500, 3000]);
 
             const now = new Date();
             document.getElementById('status').textContent =
-                `Last updated: ${now.toLocaleString()} (${dates.length} sessions)`;
+                `Last updated: ${now.toLocaleString()}`;
         }
 
         loadData();
