@@ -16,7 +16,7 @@
             flex-direction: column;
             align-items: center;
         }
-        .plot { width: 100%; max-width: 900px; height: 70vh; min-height: 350px; }
+        .plot { width: 100%; max-width: 900px; height: 70vh; min-height: 350px; margin-bottom: 60px; }
         .controls {
             padding: 12px;
             display: flex;
@@ -252,10 +252,11 @@
             Plotly.newPlot(divId, [refLine, trace], layout, { responsive: true, displayModeBar: false });
         }
 
-        function plotTopWeight(divId, data, title) {
+        function plotTopWeight(divId, data, title, satReps) {
             // Size dots by reps at top weight, color by reps too
-            const maxReps = Math.max(...data.repsAtTop);
-            const sizes = data.repsAtTop.map(r => 6 + (r / maxReps) * 24);
+            // satReps caps the scale so anything >= satReps gets max size/color
+            const capReps = satReps || Math.max(...data.repsAtTop);
+            const sizes = data.repsAtTop.map(r => 6 + (Math.min(r, capReps) / capReps) * 24);
 
             const trace = {
                 x: data.dates,
@@ -264,7 +265,9 @@
                 type: 'scatter',
                 marker: {
                     size: sizes,
-                    color: data.repsAtTop,
+                    color: data.repsAtTop.map(r => Math.min(r, capReps)),
+                    cmin: 0,
+                    cmax: capReps,
                     colorscale: [
                         [0, '#fee08b'],
                         [0.5, '#fc8d59'],
@@ -329,7 +332,7 @@
             document.getElementById('loading').style.display = 'none';
 
             plotBench('plot-bench', bench);
-            plotTopWeight('plot-deadlift', deadlift, 'Deadlift');
+            plotTopWeight('plot-deadlift', deadlift, 'Deadlift', 5);
             plotTopWeight('plot-squat', squat, 'Squat');
 
             const now = new Date();
