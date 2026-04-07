@@ -242,7 +242,7 @@
             const layout = {
                 title: { text: 'Bench', font: { color: '#333', size: 20 } },
                 xaxis: { title: 'Mean', range: [130, 175], gridcolor: '#e0e0e0' },
-                yaxis: { title: 'Volume', range: [1500, 4000], gridcolor: '#e0e0e0' },
+                yaxis: { title: 'Volume', range: [1300, 4500], gridcolor: '#e0e0e0' },
                 showlegend: false,
                 paper_bgcolor: '#ffffff',
                 plot_bgcolor: '#ffffff',
@@ -333,7 +333,7 @@
 
             plotBench('plot-bench', bench);
             plotTopWeight('plot-deadlift', deadlift, 'Deadlift', 5);
-            plotTopWeight('plot-squat', squat, 'Squat', 6);
+            plotTopWeight('plot-squat', squat, 'Squat', 7);
 
             const now = new Date();
             document.getElementById('status').textContent =
