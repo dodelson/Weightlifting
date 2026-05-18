@@ -46,6 +46,7 @@
     </div>
     <div id="loading">Fetching data...</div>
     <div id="plot-bench" class="plot"></div>
+    <div id="plot-bench-top" class="plot"></div>
     <div id="plot-deadlift" class="plot"></div>
     <div id="plot-squat" class="plot"></div>
 
@@ -334,12 +335,14 @@
             const dataRows = rows.slice(2);
 
             const bench = extractBench(dataRows, 1, 5);
+            const benchTop = extractTopWeight(dataRows, 1, 5, 'maxSet');
             const deadlift = extractTopWeight(dataRows, 6, 10, 'total');
             const squat = extractTopWeight(dataRows, 11, 15, 'maxSet');
 
             document.getElementById('loading').style.display = 'none';
 
             plotBench('plot-bench', bench);
+            plotTopWeight('plot-bench-top', benchTop, 'Bench (top set)', 5);
             plotTopWeight('plot-deadlift', deadlift, 'Deadlift', 5);
             plotTopWeight('plot-squat', squat, 'Squat', 7);
 
