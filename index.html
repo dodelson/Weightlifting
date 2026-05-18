@@ -51,28 +51,29 @@
 
     <script>
         function parseSet(val) {
-            if (!val) return { reps: 0, weight: 0 };
+            const empty = { reps: 0, repsPerSet: 0, weight: 0 };
+            if (!val) return empty;
             val = val.trim();
-            if (!val) return { reps: 0, weight: 0 };
-            if (/[a-zA-Z]/.test(val.replace(/x/gi, ''))) return { reps: 0, weight: 0 };
+            if (!val) return empty;
+            if (/[a-zA-Z]/.test(val.replace(/x/gi, ''))) return empty;
 
             const parts = val.split(/x/i);
             if (parts.length === 1) {
                 const w = parseFloat(parts[0]);
-                return isNaN(w) ? { reps: 0, weight: 0 } : { reps: 1, weight: w };
+                return isNaN(w) ? empty : { reps: 1, repsPerSet: 1, weight: w };
             } else if (parts.length === 2) {
                 const a = parseFloat(parts[0]);
                 const b = parseFloat(parts[1]);
-                if (isNaN(a) || isNaN(b)) return { reps: 0, weight: 0 };
-                return { reps: a, weight: b };
+                if (isNaN(a) || isNaN(b)) return empty;
+                return { reps: a, repsPerSet: a, weight: b };
             } else if (parts.length === 3) {
                 const sets = parseFloat(parts[0]);
                 const repsPerSet = parseFloat(parts[1]);
                 const w = parseFloat(parts[2]);
-                if (isNaN(sets) || isNaN(repsPerSet) || isNaN(w)) return { reps: 0, weight: 0 };
-                return { reps: sets * repsPerSet, weight: w };
+                if (isNaN(sets) || isNaN(repsPerSet) || isNaN(w)) return empty;
+                return { reps: sets * repsPerSet, repsPerSet, weight: w };
             }
-            return { reps: 0, weight: 0 };
+            return empty;
         }
 
         function parseCSV(text) {
@@ -150,8 +151,11 @@
             return { dates, dateNums, volumes, means, hoverTexts };
         }
 
-        // For deadlift/squat: date vs top weight, sized/colored by reps at top weight
-        function extractTopWeight(dataRows, colStart, colEnd) {
+        // For deadlift/squat: date vs top weight, sized/colored by reps at top weight.
+        // mode='total': sum reps across all sets at top weight.
+        // mode='maxSet': max reps in any single set at top weight.
+        function extractTopWeight(dataRows, colStart, colEnd, mode) {
+            const useMaxSet = mode === 'maxSet';
             const dates = [], topWeights = [], repsAtTop = [], hoverTexts = [];
             for (const row of dataRows) {
                 if (!row || row.length < 2) continue;
@@ -161,7 +165,6 @@
                 const dateObj = fixDate(dateStr);
                 if (!dateObj) continue;
 
-                // Collect all sets
                 const sets = [];
                 let hasData = false;
                 for (let c = colStart; c <= colEnd && c < row.length; c++) {
@@ -173,20 +176,25 @@
                 }
                 if (!hasData) continue;
 
-                // Find top weight and count reps at that weight
                 let maxWeight = 0;
                 for (const s of sets) {
                     if (s.weight > maxWeight) maxWeight = s.weight;
                 }
                 let repsTop = 0;
                 for (const s of sets) {
-                    if (s.weight === maxWeight) repsTop += s.reps;
+                    if (s.weight !== maxWeight) continue;
+                    if (useMaxSet) {
+                        if (s.repsPerSet > repsTop) repsTop = s.repsPerSet;
+                    } else {
+                        repsTop += s.reps;
+                    }
                 }
 
+                const repsLabel = useMaxSet ? 'Reps (top set)' : 'Reps at top';
                 dates.push(dateObj);
                 topWeights.push(maxWeight);
                 repsAtTop.push(repsTop);
-                hoverTexts.push(`${dateStr}<br>Top: ${maxWeight}<br>Reps at top: ${repsTop}`);
+                hoverTexts.push(`${dateStr}<br>Top: ${maxWeight}<br>${repsLabel}: ${repsTop}`);
             }
             return { dates, topWeights, repsAtTop, hoverTexts };
         }
@@ -326,8 +334,8 @@
             const dataRows = rows.slice(2);
 
             const bench = extractBench(dataRows, 1, 5);
-            const deadlift = extractTopWeight(dataRows, 6, 10);
-            const squat = extractTopWeight(dataRows, 11, 15);
+            const deadlift = extractTopWeight(dataRows, 6, 10, 'total');
+            const squat = extractTopWeight(dataRows, 11, 15, 'maxSet');
 
             document.getElementById('loading').style.display = 'none';
 
