@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lifting Tracker</title>
+    <title>Joe — Lifting Tracker</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -45,7 +45,7 @@
 </head>
 <body>
     <nav>
-        <span class="current">Scott</span> | <a href="joe.html">Joe</a>
+        <a href="index.html">Scott</a> | <span class="current">Joe</span>
     </nav>
     <div class="controls">
         <span id="status">Loading...</span>
@@ -127,7 +127,6 @@
             return parsed;
         }
 
-        // For bench: volume vs mean, colored by date
         function extractBench(dataRows, colStart, colEnd) {
             const dates = [], volumes = [], means = [], hoverTexts = [], dateNums = [];
             for (const row of dataRows) {
@@ -159,9 +158,6 @@
             return { dates, dateNums, volumes, means, hoverTexts };
         }
 
-        // For deadlift/squat: date vs top weight, sized/colored by reps at top weight.
-        // mode='total': sum reps across all sets at top weight.
-        // mode='maxSet': max reps in any single set at top weight.
         function extractTopWeight(dataRows, colStart, colEnd, mode) {
             const useMaxSet = mode === 'maxSet';
             const dates = [], topWeights = [], repsAtTop = [], hoverTexts = [];
@@ -209,11 +205,13 @@
 
         function makeColorbar(dateNums) {
             const valid = dateNums.filter(d => d > 0);
+            if (valid.length === 0) return { title: 'Date' };
             const mn = Math.min(...valid), mx = Math.max(...valid);
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             const tickvals = [], ticktext = [];
-            for (let i = 0; i <= 4; i++) {
-                const t = mn + (mx - mn) * i / 4;
+            const n = mn === mx ? 1 : 4;
+            for (let i = 0; i <= n; i++) {
+                const t = n === 0 ? mn : mn + (mx - mn) * i / n;
                 tickvals.push(t);
                 const d = new Date(t);
                 ticktext.push(`${months[d.getMonth()]} ${d.getFullYear()}`);
@@ -222,6 +220,15 @@
         }
 
         function plotBench(divId, data) {
+            if (data.means.length === 0) {
+                document.getElementById(divId).innerHTML = '<p style="padding:20px;opacity:0.6;">No bench data.</p>';
+                return;
+            }
+            const minMean = Math.min(...data.means);
+            const maxMean = Math.max(...data.means);
+            const pad = Math.max(5, (maxMean - minMean) * 0.2);
+            const xLo = minMean - pad, xHi = maxMean + pad;
+
             const trace = {
                 x: data.means,
                 y: data.volumes,
@@ -246,8 +253,8 @@
             };
 
             const refLine = {
-                x: [130, 175],
-                y: [130 * 15, 175 * 15],
+                x: [xLo, xHi],
+                y: [xLo * 15, xHi * 15],
                 mode: 'lines',
                 type: 'scatter',
                 line: { dash: 'dash', color: 'rgba(0,0,0,0.2)', width: 1.5 },
@@ -257,8 +264,8 @@
 
             const layout = {
                 title: { text: 'Bench', font: { color: '#333', size: 20 } },
-                xaxis: { title: 'Mean', range: [130, 175], gridcolor: '#e0e0e0' },
-                yaxis: { title: 'Volume', range: [1300, 4500], gridcolor: '#e0e0e0' },
+                xaxis: { title: 'Mean', gridcolor: '#e0e0e0' },
+                yaxis: { title: 'Volume', gridcolor: '#e0e0e0' },
                 showlegend: false,
                 paper_bgcolor: '#ffffff',
                 plot_bgcolor: '#ffffff',
@@ -269,8 +276,10 @@
         }
 
         function plotTopWeight(divId, data, title, satReps) {
-            // Size dots by reps at top weight, color by reps too
-            // satReps caps the scale so anything >= satReps gets max size/color
+            if (data.topWeights.length === 0) {
+                document.getElementById(divId).innerHTML = `<p style="padding:20px;opacity:0.6;">No ${title.toLowerCase()} data.</p>`;
+                return;
+            }
             const capReps = satReps || Math.max(...data.repsAtTop);
             const sizes = data.repsAtTop.map(r => 6 + (Math.min(r, capReps) / capReps) * 24);
 
@@ -315,8 +324,8 @@
             document.getElementById('status').textContent = 'Loading...';
 
             const urls = [
-                'https://docs.google.com/spreadsheets/d/1SlEJF74TRMOfuJFkaV0DX6n5SLbGs2PDiyeAyC_2hEQ/gviz/tq?tqx=out:csv',
-                'https://docs.google.com/spreadsheets/d/1SlEJF74TRMOfuJFkaV0DX6n5SLbGs2PDiyeAyC_2hEQ/export?format=csv'
+                'https://docs.google.com/spreadsheets/d/1SlEJF74TRMOfuJFkaV0DX6n5SLbGs2PDiyeAyC_2hEQ/gviz/tq?tqx=out:csv&sheet=Joe',
+                'https://docs.google.com/spreadsheets/d/1SlEJF74TRMOfuJFkaV0DX6n5SLbGs2PDiyeAyC_2hEQ/export?format=csv&sheet=Joe'
             ];
 
             let text = null;
@@ -339,12 +348,13 @@
             }
 
             const rows = parseCSV(text);
-            const dataRows = rows.slice(2);
+            const dataRows = rows.slice(1);
 
+            // Joe sheet columns: Date | Bench×5 (1-5) | Deadlift×4 (6-9) | Squat×5 (10-14)
             const bench = extractBench(dataRows, 1, 5);
             const benchTop = extractTopWeight(dataRows, 1, 5, 'maxSet');
-            const deadlift = extractTopWeight(dataRows, 6, 10, 'total');
-            const squat = extractTopWeight(dataRows, 11, 15, 'maxSet');
+            const deadlift = extractTopWeight(dataRows, 6, 9, 'total');
+            const squat = extractTopWeight(dataRows, 10, 14, 'maxSet');
 
             document.getElementById('loading').style.display = 'none';
 
