@@ -55,6 +55,7 @@
     <div id="plot-bench" class="plot"></div>
     <div id="plot-bench-top" class="plot"></div>
     <div id="plot-deadlift" class="plot"></div>
+    <div id="plot-squat-volume" class="plot"></div>
     <div id="plot-squat" class="plot"></div>
 
     <script>
@@ -127,8 +128,8 @@
             return parsed;
         }
 
-        // For bench: volume vs mean, colored by date
-        function extractBench(dataRows, colStart, colEnd) {
+        // Volume vs rep-weighted mean, colored by date.
+        function extractVolume(dataRows, colStart, colEnd) {
             const dates = [], volumes = [], means = [], hoverTexts = [], dateNums = [];
             for (const row of dataRows) {
                 if (!row || row.length < 2) continue;
@@ -221,7 +222,14 @@
             return { title: 'Date', tickvals, ticktext };
         }
 
-        function plotBench(divId, data) {
+        function plotVolume(divId, data, title, xRange, yRange) {
+            if (data.means.length === 0) {
+                Plotly.purge(divId);
+                document.getElementById(divId).textContent = `No ${title.toLowerCase()} sessions recorded.`;
+                return;
+            }
+            document.getElementById(divId).textContent = '';
+
             const trace = {
                 x: data.means,
                 y: data.volumes,
@@ -256,16 +264,17 @@
             };
 
             const layout = {
-                title: { text: 'Bench', font: { color: '#333', size: 20 } },
-                xaxis: { title: 'Mean', range: [130, 175], gridcolor: '#e0e0e0' },
-                yaxis: { title: 'Volume', range: [1300, 4500], gridcolor: '#e0e0e0' },
+                title: { text: title, font: { color: '#333', size: 20 } },
+                xaxis: { title: 'Mean', range: xRange, gridcolor: '#e0e0e0' },
+                yaxis: { title: 'Volume', range: yRange, gridcolor: '#e0e0e0' },
                 showlegend: false,
                 paper_bgcolor: '#ffffff',
                 plot_bgcolor: '#ffffff',
                 margin: { t: 50, b: 50, l: 60, r: 20 }
             };
 
-            Plotly.newPlot(divId, [refLine, trace], layout, { responsive: true, displayModeBar: false });
+            const traces = xRange ? [refLine, trace] : [trace];
+            Plotly.newPlot(divId, traces, layout, { responsive: true, displayModeBar: false });
         }
 
         function plotTopWeight(divId, data, title, satReps) {
@@ -341,16 +350,18 @@
             const rows = parseCSV(text);
             const dataRows = rows.slice(2);
 
-            const bench = extractBench(dataRows, 1, 5);
+            const bench = extractVolume(dataRows, 1, 5);
             const benchTop = extractTopWeight(dataRows, 1, 5, 'maxSet');
             const deadlift = extractTopWeight(dataRows, 6, 10, 'total');
             const squat = extractTopWeight(dataRows, 11, 15, 'maxSet');
+            const squatVolume = extractVolume(dataRows, 11, 15);
 
             document.getElementById('loading').style.display = 'none';
 
-            plotBench('plot-bench', bench);
+            plotVolume('plot-bench', bench, 'Bench', [130, 175], [1300, 4500]);
             plotTopWeight('plot-bench-top', benchTop, 'Bench (top set)', 5);
             plotTopWeight('plot-deadlift', deadlift, 'Deadlift', 5);
+            plotVolume('plot-squat-volume', squatVolume, 'Squat (mean vs volume)');
             plotTopWeight('plot-squat', squat, 'Squat', 7);
 
             const now = new Date();
